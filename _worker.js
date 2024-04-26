@@ -1648,7 +1648,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             <button onclick="openQR('https://${hostName}/sub/${userID}#BPB-Normal', 'Normal Subscription')" style="margin-bottom: 8px;">
                                 QR Code&nbsp;<span class="material-symbols-outlined">qr_code</span>
                             </button>
-                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#⭐️TelegramID:@uinet_bot', false)">
+                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#TelegramID:@uinet_bot', false)">
                                 Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
                         </td>
@@ -1665,7 +1665,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             </div>
                         </td>
 						<td>
-                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#singbox#⭐️TelegramID:@uinet_bot', false)">
+                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#singbox#TelegramID:@uinet_bot', false)">
                                 Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
 						</td>
@@ -1681,7 +1681,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             <button onclick="openQR('sing-box://import-remote-profile?url=https://${hostName}/sub/${userID}#sfa#BPB-Normal', 'Normal Subscription')" style="margin-bottom: 8px;">
                                 QR Code&nbsp;<span class="material-symbols-outlined">qr_code</span>
                             </button>
-                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#sfa#⭐️TelegramID:@uinet_bot', false)">
+                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#sfa#TelegramID:@uinet_bot', false)">
                                 Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
                         </td>
