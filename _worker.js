@@ -7,7 +7,7 @@ import { connect } from 'cloudflare:sockets';
 
 // How to generate your own UUID:
 // https://www.uuidgenerator.net/
-let userID = '44578aea-2471-4c75-9df8-226127a01986';
+let userID = '89b3cbba-e6ac-485a-9481-976a0415eab9';
 
 // https://www.nslookup.io/domains/cdn.xn--b6gac.eu.org/dns-records/
 // https://www.nslookup.io/domains/cdn-all.xn--b6gac.eu.org/dns-records/
@@ -73,28 +73,36 @@ export default {
 
                     case '/panel':
 
-                        if (typeof env.bpb !== 'object') {
-                            const errorPage = renderErrorPage('KV Dataset is not properly set!', null, true);
+                        if (!env.bpb) {
+                            const errorPage = renderErrorPage('KV Dataset is not properly set!');
                             return new Response(errorPage, { status: 200, headers: {'Content-Type': 'text/html'}});
                         }
 
-                        let isAuth = await Authenticate(request, env); 
-                        
-                        if (request.method === 'POST') {
+                        if (request.method === 'POST') {    
+
+                            if (!(await Authenticate(request, env))) {                            
+                                return new Response('Unauthorized', { status: 401 });  
+                            }
                             
-                            if (!isAuth) return new Response('Unauthorized', { status: 401 });             
                             const formData = await request.formData();
                             await updateDataset(env, formData);
 
                             return new Response('Success', { status: 200 });
                         }
-                        
-                        if (!isAuth) return Response.redirect(`${url.origin}/login`, 302);
-                        if (! await env.bpb.get('proxySettings')) await updateDataset(env);
-                        let fragConfs = await getFragmentConfigs(env, host, 'nekoray');
-                        let homePage = await renderHomePage(env, host, fragConfs);
+                            
 
-                        return new Response(homePage, {
+                        if (!(await Authenticate(request, env))) {
+                            return Response.redirect(`${url.origin}/login`, 302);        
+                        }
+
+                        if (! await env.bpb.get('proxySettings')) {
+                            await updateDataset(env);
+                        }
+
+                        const fragConfs = await getFragmentConfigs(env, host, 'nekoray');                        
+                        const htmlPage = await renderHomePage(env, host, fragConfs);
+
+                        return new Response(htmlPage, {
                             status: 200,
                             headers: {
                                 'Content-Type': 'text/html',
@@ -109,22 +117,28 @@ export default {
                                                       
                     case '/login':
 
-                        if (typeof env.bpb !== 'object') {
-                            const errorPage = renderErrorPage('KV Dataset is not properly set!', null, true);
+                        if (!env.bpb) {
+                            const errorPage = renderErrorPage('KV Dataset is not properly set!');
                             return new Response(errorPage, { status: 200, headers: {'Content-Type': 'text/html'}});
                         }
 
-                        let loginAuth = await Authenticate(request, env);
-                        if (loginAuth) return Response.redirect(`${url.origin}/panel`, 302);
+                        if (await Authenticate(request, env)) {
+                            return Response.redirect(`${url.origin}/panel`, 302);       
+                        }
 
                         let secretKey = await env.bpb.get('secretKey');
-                        const pwd = await env.bpb.get('pwd');
-                        if (!pwd) await env.bpb.put('pwd', 'admin');
+                        let pwd = await env.bpb.get('pwd');
+
+
+                        if (!pwd) {
+                            await env.bpb.put('pwd', 'admin');
+                        }
 
                         if (!secretKey) {
                             secretKey = generateSecretKey();
                             await env.bpb.put('secretKey', secretKey);
                         }
+
 
                         if (request.method === 'POST') {
                             const password = await request.text();
@@ -173,11 +187,17 @@ export default {
 
                     case '/panel/password':
 
-                        let passAuth = await Authenticate(request, env);
-                        if (!passAuth) return new Response('Unauthorized!', { status: 401 });           
+                        if (!(await Authenticate(request, env))) {                            
+                            return new Response('Unauthorized!', { status: 401 });  
+                        }
+                        
                         const newPwd = await request.text();
                         const oldPwd = await env.bpb.get('pwd');
-                        if (newPwd === oldPwd) return new Response('Please enter a new Password!', { status: 400 });
+
+                        if (newPwd === oldPwd) {
+                            return new Response('Please enter a new Password!', { status: 400 });
+                        }
+
                         await env.bpb.put('pwd', newPwd);
 
                         return new Response('Success', {
@@ -190,6 +210,7 @@ export default {
 
                     default:
                         // return new Response('Not found', { status: 404 });
+                        // For any other path, reverse proxy to 'www.fmprc.gov.cn' and return the original response
                         url.hostname = 'www.speedtest.net';
                         url.protocol = 'https:';
                         request = new Request(url, request);
@@ -200,7 +221,7 @@ export default {
             }
         } catch (err) {
             /** @type {Error} */ let e = err;
-            const errorPage = renderErrorPage('Something went wrong!', e.message.toString(), false);
+            const errorPage = renderErrorPage('Something went wrong!', e.toString());
             return new Response(errorPage, { status: 200, headers: {'Content-Type': 'text/html'}});
         }
     },
@@ -765,17 +786,8 @@ async function handleUDPOutBound(webSocket, vlessResponseHeader, log) {
  */
 
 const getNormalConfigs = async (env, hostName, client) => {
-    let proxySettings = {};
     let vlessWsTls = '';
-
-    try {
-        proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
-    } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while getting normal configs - ${error}`);
-    }
-
-    const { cleanIPs } = proxySettings;
+    const { cleanIPs } = await env.bpb.get("proxySettings", {type: 'json'});
     const resolved = await resolveDNS(hostName);
     const Addresses = [
         hostName,
@@ -786,7 +798,7 @@ const getNormalConfigs = async (env, hostName, client) => {
     ];
 
     Addresses.forEach((addr) => {
-        let remark = `⭐️${addr}`;
+        let remark = `⭐️ ${addr}`;
         remark = remark.length <= 30 ? remark : `${remark.slice(0,29)}...`;
 
         vlessWsTls += 'vless' + `://${userID}@${addr}:443?encryption=none&security=tls&type=ws&host=${
@@ -905,16 +917,9 @@ const buildProxyOutbound = async (proxyParams) => {
 }
 
 const buildWorkerLessConfig = async (env, client) => {
-    let proxySettings = {};
-
-    try {
-        proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
-    } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while generating WorkerLess config - ${error}`);
-    }
-
-    const { remoteDNS, lengthMin,  lengthMax,  intervalMin,  intervalMax, blockAds } = proxySettings;  
+    let proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
+    const { remoteDNS, lengthMin,  lengthMax,  intervalMin,  intervalMax, blockAds } = proxySettings;
+    
     let fakeOutbound = structuredClone(xrayOutboundTemp);
     delete fakeOutbound.mux;
     fakeOutbound.settings.vnext[0].address = 'google.com';
@@ -922,14 +927,14 @@ const buildWorkerLessConfig = async (env, client) => {
     delete fakeOutbound.streamSettings.sockopt;
     fakeOutbound.streamSettings.tlsSettings.serverName = 'google.com';
     fakeOutbound.streamSettings.wsSettings.headers.Host = 'google.com';
-    fakeOutbound.streamSettings.wsSettings.path = '/';
+    fakeOutbound.streamSettings.wsSettings.path = '/?ed=2560';
     delete fakeOutbound.streamSettings.grpcSettings;
     delete fakeOutbound.streamSettings.tcpSettings;
     delete fakeOutbound.streamSettings.realitySettings;
     fakeOutbound.tag = 'fake-outbound';
 
     let fragConfig = structuredClone(xrayConfigTemp);
-    fragConfig.remarks  = '💦 BPB Frag - WorkerLess ⭐'
+    fragConfig.remarks  = 'WorkerLess'
     fragConfig.dns.servers[0] = remoteDNS;
     fragConfig.dns.servers.pop();
     fragConfig.outbounds[0].settings.domainStrategy = 'UseIP';
@@ -957,16 +962,7 @@ const buildWorkerLessConfig = async (env, client) => {
 const getFragmentConfigs = async (env, hostName, client) => {
     let Configs = [];
     let outbounds = [];
-    let proxySettings = {};
-    let proxyOutbound;
-
-    try {
-        proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
-    } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while getting fragment configs - ${error}`);
-    }
-
+    let proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
     const {
         remoteDNS, 
         localDNS, 
@@ -981,6 +977,7 @@ const getFragmentConfigs = async (env, hostName, client) => {
         outProxyParams
     } = proxySettings;
 
+    let proxyOutbound;
     const resolved = await resolveDNS(hostName);
     const Addresses = [
         hostName,
@@ -995,7 +992,7 @@ const getFragmentConfigs = async (env, hostName, client) => {
         try {
             proxyOutbound = await buildProxyOutbound(proxyParams);
         } catch (error) {
-            console.log('An error occured while parsing chain proxy: ', error);
+            console.log(error);
             proxyOutbound = undefined;
             await env.bpb.put("proxySettings", JSON.stringify({
                 ...proxySettings, 
@@ -1008,7 +1005,7 @@ const getFragmentConfigs = async (env, hostName, client) => {
 
         let fragConfig = structuredClone(xrayConfigTemp);
         let outbound = structuredClone(xrayOutboundTemp);
-        let remark = `⭐️⭐️⭐️${addr}`;
+        let remark = `⭐️⭐️⭐️ ${addr}`;
         delete outbound.mux;
         delete outbound.streamSettings.grpcSettings;
         delete outbound.streamSettings.realitySettings;
@@ -1077,7 +1074,7 @@ const getFragmentConfigs = async (env, hostName, client) => {
 
 
     let bestPing = structuredClone(xrayConfigTemp);
-    bestPing.remarks = '💦 BPB Frag - Best Ping 💥';
+    bestPing.remarks = 'Best Ping';
     bestPing.dns.servers[0] = remoteDNS;
     bestPing.dns.servers[1].address = localDNS;
     bestPing.outbounds[0].settings.fragment.length = `${lengthMin}-${lengthMax}`;
@@ -1122,16 +1119,12 @@ const getFragmentConfigs = async (env, hostName, client) => {
 }
 
 const getSingboxConfig = async (env, hostName) => {
-    let proxySettings = {};
-    
-    try {
-        proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
-    } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while getting sing-box configs - ${error}`);
-    }
+    const {
+        remoteDNS, 
+        localDNS,
+        cleanIPs
+    } = await env.bpb.get("proxySettings", {type: 'json'});
 
-    const { remoteDNS,  localDNS, cleanIPs } = proxySettings
     let config = structuredClone(singboxConfigTemp);
     config.dns.servers[0].address = remoteDNS;
     config.dns.servers[1].address = localDNS;
@@ -1181,8 +1174,7 @@ const updateDataset = async (env, Settings) => {
     try {    
         await env.bpb.put("proxySettings", JSON.stringify(proxySettings));          
     } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while updating KV - ${error}`);
+        throw new error(error);
     }
 }
 
@@ -1227,7 +1219,6 @@ const resolveDNS = async (domain) => {
         return { ipv4, ipv6 };
     } catch (error) {
         console.error('Error resolving DNS:', error);
-        throw new Error(`An error occurred while resolving DNS - ${error}`);
     }
 }
 
@@ -1255,17 +1246,14 @@ const generateSecretKey = () => {
 }
   
 const Authenticate = async (request, env) => {
-    
+    const secretKey = await env.bpb.get('secretKey');
+
     try {
-        const secretKey = await env.bpb.get('secretKey');
         const cookie = request.headers.get('Cookie');
         const cookieMatch = cookie ? cookie.match(/(^|;\s*)jwtToken=([^;]*)/) : null;
         const token = cookieMatch ? cookieMatch.pop() : null;
 
-        if (!token) {
-            console.log('token');
-            return false;
-        }
+        if (!token) return false;
 
         const tokenWithoutBearer = token.startsWith('Bearer ') ? token.slice(7) : token;
         const [encodedHeader, encodedPayload, signature] = tokenWithoutBearer.split('.');
@@ -1283,21 +1271,11 @@ const Authenticate = async (request, env) => {
 
         return true;
     } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while authentication - ${error}`);
+        return false;
     }
 }
 
 const renderHomePage = async (env, hostName, fragConfigs) => {
-    let proxySettings = {};
-    
-    try {
-        proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
-    } catch (error) {
-        console.log(error);
-        throw new Error(`An error occurred while rendering home page - ${error}`);
-    }
-
     const {
         remoteDNS, 
         localDNS, 
@@ -1309,7 +1287,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
         bypassIran,
         cleanIPs,
         outProxy
-    } = proxySettings;
+    } = await env.bpb.get("proxySettings", {type: 'json'});
 
     const genCustomConfRow = async (configs) => {
         let tableBlock = "";
@@ -1343,7 +1321,6 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>UINET${panelVersion}</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
 		<style>
@@ -1356,7 +1333,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                 'GRAD' 0,
                 'opsz' 24
             }
-            h1 { font-size: 2.5em; text-align: center; color: #09639f; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.25); }
+            h1 { font-size: 2.5em; text-align: center; color: #09639f }
 			h2 { margin: 30px 0; text-align: center; color: #3b3b3b; }
 			hr { border: 1px solid #ddd; margin: 20px 0; }
             .footer {
@@ -1485,7 +1462,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
             .modal-content {
                 background-color: #f9f9f9;
                 margin: auto;
-                padding: 10px 20px 20px;
+                padding: 20px;
                 border: 1px solid #eaeaea;
                 border-radius: 10px;
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -1522,17 +1499,6 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
             .form-control input[type="password"]:focus { border-color: #3498db; outline: none; }
             #passwordError { color: red; margin-bottom: 10px; }
             .symbol { margin-right: 8px; }
-            .modalQR {
-                display: none;
-                position: fixed;
-                z-index: 1;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                overflow: auto;
-                background-color: rgba(0, 0, 0, 0.4);
-            }
             @media only screen and (min-width: 768px) {
                 .form-container { max-width: 70%; }
                 #apply { display: block; margin: 30px auto 0 auto; max-width: 50%; }
@@ -1542,9 +1508,9 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
 	</head>
 	
 	<body>
-		<h1>UINET<span style="font-size: smaller;">${panelVersion}</span>UINET</h1>
+		<h1> Panel <span style="font-size: smaller;">${panelVersion}</span> UINET</h1>
 		<div class="form-container">
-            <h2>FRAGMENT SETTINGS ⚙️</h2>
+            <h2>FRAGMENT SETTINGS⚙️</h2>
 			<form id="configForm">
 				<div class="form-control">
 					<label for="remoteDNS">🌏 Remote DNS</label>
@@ -1568,10 +1534,10 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
 					<label for="fragmentIntervalMin">🕞 Interval</label>
 					<div style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline;">
 						<input type="number" id="fragmentIntervalMin" name="fragmentIntervalMin"
-    						value="${intervalMin}" max="30" required>
+						value="${intervalMin}" max="30" required>
 						<span style="text-align: center; white-space: pre;"> - </span>
 						<input type="number" id="fragmentIntervalMax" name="fragmentIntervalMax"
-    						value="${intervalMax}" max="30" required>
+						value="${intervalMax}" max="30" required>
 					</div>
 				</div>
 				<div class="form-control">
@@ -1609,7 +1575,8 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
 					</div>
 				</div>
 			</form>
-            <hr>            
+            <hr>
+            
 			<h2>NORMAL CONFIGS 🔗</h2>
 			<div class="table-container">
 				<table id="normal-configs-table">
@@ -1637,19 +1604,13 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             </div>
                             <div>
                                 <span class="material-symbols-outlined symbol">verified</span>
-                                <span>Hiddify</span>
-                            </div>
-                            <div>
-                                <span class="material-symbols-outlined symbol">verified</span>
                                 <span>Nekoray (Xray)</span>
                             </div>
                         </td>
 						<td>
-                            <button onclick="openQR('https://${hostName}/sub/${userID}#BPB-Normal', 'Normal Subscription')" style="margin-bottom: 8px;">
-                                QR Code&nbsp;<span class="material-symbols-outlined">qr_code</span>
-                            </button>
-                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#TelegramID:@uinet_bot', false)">
-                                Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
+                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#TelegramID:@uinet_bot-(Normal)', false)">
+                                Copy Sub
+                                <span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
                         </td>
 					</tr>
@@ -1661,12 +1622,17 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             </div>
                             <div>
                                 <span class="material-symbols-outlined symbol">verified</span>
+                                <span>Hiddify Next</span>
+                            </div>
+                            <div>
+                                <span class="material-symbols-outlined symbol">verified</span>
                                 <span>Nekoray (Sing-Box)</span>
                             </div>
                         </td>
 						<td>
-                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#singbox#TelegramID:@uinet_bot', false)">
-                                Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
+                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#TelegramID:@uinet_bot-(Normal)', false)">
+                                Copy Sub
+                                <span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
 						</td>
 					</tr>
@@ -1678,11 +1644,9 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             </div>
                         </td>
                         <td>
-                            <button onclick="openQR('sing-box://import-remote-profile?url=https://${hostName}/sub/${userID}#sfa#BPB-Normal', 'Normal Subscription')" style="margin-bottom: 8px;">
-                                QR Code&nbsp;<span class="material-symbols-outlined">qr_code</span>
-                            </button>
-                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#sfa#TelegramID:@uinet_bot', false)">
-                                Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
+                            <button onclick="copyToClipboard('https://${hostName}/sub/${userID}#TelegramID:@uinet_bot(Normal)', false)">
+                                Copy Sub
+                                <span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
                         </td>
                     </tr>
@@ -1712,11 +1676,9 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                             </div>
                         </td>
                         <td>
-                            <button onclick="openQR('https://${hostName}/fragsub/${userID}#BPB Fragment', 'Fragment Subscription')" style="margin-bottom: 8px;">
-                                QR Code&nbsp;<span class="material-symbols-outlined">qr_code</span>
-                            </button>
-                            <button onclick="copyToClipboard('https://${hostName}/fragsub/${userID}#BPB Fragment', true)">
-                                Copy Sub<span class="material-symbols-outlined">format_list_bulleted</span>
+                            <button onclick="copyToClipboard('https://${hostName}/fragsub/${userID}#TelegramID:@uinet_bot-(Anti-filter)', true)">
+                                Copy Sub
+                                <span class="material-symbols-outlined">format_list_bulleted</span>
                             </button>
                         </td>
                     </tr>
@@ -1734,29 +1696,20 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
 			</div>
             <div id="myModal" class="modal">
                 <div class="modal-content">
-                    <span class="close">&times;</span>
-                    <form id="passwordChangeForm">
-                        <h2>Change Password</h2>
-                        <div class="form-control">
-                            <label for="newPassword">New Password</label>
-                            <input type="password" id="newPassword" name="newPassword" required>
-                            </div>
-                        <div class="form-control">
-                            <label for="confirmPassword">Confirm Password</label>
-                            <input type="password" id="confirmPassword" name="confirmPassword" required>
+                <span class="close">&times;</span>
+                <form id="passwordChangeForm">
+                    <h2>Change Password</h2>
+                    <div class="form-control">
+                        <label for="newPassword">New Password</label>
+                        <input type="password" id="newPassword" name="newPassword" required>
                         </div>
-                        <div id="passwordError" style="color: red; margin-bottom: 10px;"></div>
-                        <button id="changePasswordBtn" type="submit" class="button">Change Password</button>
-                    </form>
-                </div>
-            </div>
-            <div id="myQRModal" class="modalQR">
-                <div class="modal-content" style="width: auto; text-align: center;">
-                    <div style="display: flex; flex-direction: column; align-items: center; margin-bottom: 10px;">
-                        <span id="closeQRModal" class="close" style="align-self: flex-end;">&times;</span>
-                        <span id="qrcodeTitle" style="align-self: center; font-weight: bold;"></span>
+                    <div class="form-control">
+                        <label for="confirmPassword">Confirm Password</label>
+                        <input type="password" id="confirmPassword" name="confirmPassword" required>
                     </div>
-                    <div id="qrcode-container"></div>
+                    <div id="passwordError" style="color: red; margin-bottom: 10px;"></div>
+                    <button id="changePasswordBtn" type="submit" class="button">Change Password</button>
+                </form>
                 </div>
             </div>
             <div class="footer">
@@ -1768,8 +1721,7 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                 </button>
             </div>
         </div>
-        
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
 	<script>
 		document.addEventListener('DOMContentLoaded', () => {
             const configForm = document.getElementById('configForm');            
@@ -1779,9 +1731,6 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
             const passwordChangeForm = document.getElementById('passwordChangeForm');            
             const applyBtn = document.getElementById('applyButton');         
             const initialFormData = new FormData(configForm);
-            const closeQR = document.getElementById("closeQRModal");
-            let modalQR = document.getElementById("myQRModal");
-            let qrcodeContainer = document.getElementById("qrcode-container");
           
             const hasFormDataChanged = () => {
                 const currentFormData = new FormData(configForm);
@@ -1823,37 +1772,8 @@ const renderHomePage = async (env, hostName, fragConfigs) => {
                 modal.style.display = "none";
                 document.body.style.overflow = "";
             });
-            closeQR.addEventListener('click', () => {
-                modalQR.style.display = "none";
-                qrcodeContainer.lastElementChild.remove();
-            });
-            window.onclick = (event) => {
-                if (event.target == modalQR) {
-                    modalQR.style.display = "none";
-                    qrcodeContainer.lastElementChild.remove();
-                }
-            }
+
 		});
-
-        const openQR = (url, title) => {
-            let qrcodeContainer = document.getElementById("qrcode-container");
-            let qrcodeTitle = document.getElementById("qrcodeTitle");
-            const modalQR = document.getElementById("myQRModal");
-
-            qrcodeTitle.textContent = title;
-            modalQR.style.display = "block";
-            let qrcodeDiv = document.createElement("div");
-            qrcodeDiv.className = "qrcode";
-            new QRCode(qrcodeDiv, {
-                text: url,
-                width: 256,
-                height: 256,
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.H
-            });
-            qrcodeContainer.appendChild(qrcodeDiv);
-        }
 
 		const copyToClipboard = (text, decode) => {
             const textarea = document.createElement('textarea');
@@ -2037,8 +1957,13 @@ const renderLoginPage = async () => {
             left: 50%;
             transform: translate(-50%, -50%);
             width: 90%;
+        }        
+        h1 {
+            text-align: center;
+            color: #2980b9;
+            margin-bottom: 30px;
+            margin-top: 0px;
         }
-        h1 { font-size: 2.5rem; text-align: center; color: #09639f; margin: 0 auto 30px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.25); }        
         h2 {text-align: center;}
         .form-container {
             background: #f9f9f9;
@@ -2085,7 +2010,7 @@ const renderLoginPage = async () => {
     </head>
     <body>
         <div class="container">
-            <h1>UINET<span style="font-size: smaller;">${panelVersion}</span> 💦</h1>
+            <h1>BPB Panel <span style="font-size: smaller;">${panelVersion}</span> UINET</h1>
             <div class="form-container">
                 <h2>User Login</h2>
                 <form id="loginForm">
@@ -2130,7 +2055,7 @@ const renderLoginPage = async () => {
     return html;
 }
 
-const renderErrorPage = (message, error, refer) => {
+const renderErrorPage = (message, error) => {
     return `
     <!DOCTYPE html>
     <html lang="en">
@@ -2149,19 +2074,16 @@ const renderErrorPage = (message, error, refer) => {
                 align-items: center;
                 font-family: system-ui;
             }
-            h1 { font-size: 2.5rem; text-align: center; color: #09639f; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.25); }
+            h1 { text-align: center; color: #2980b9; font-size: 2.5rem; }
             #error-container { text-align: center; }
         </style>
     </head>
 
     <body>
         <div id="error-container">
-            <h1>UINET<span style="font-size: smaller;">${panelVersion}</span> 💦</h1>
+            <h1>BPB Panel <span style="font-size: smaller;">${panelVersion}</span> UINET</h1>
             <div id="error-message">
-                <h2>${message} ${refer 
-                    ? 'Please try again or refer to <a href="https://github.com/bia-pain-bache/BPB-Worker-Panel/blob/main/README.md">documents</a>' 
-                    : ''}
-                </h2>
+                <h2>${message} Please try again or refer to <a href="https://github.com/bia-pain-bache/BPB-Worker-Panel/blob/main/README.md">documents</a></h2>
                 <p><b>${error ? `⚠️ ${error}` : ''}</b></p>
             </div>
         </div>
@@ -2456,7 +2378,7 @@ const singboxConfigTemp = {
             endpoint_independent_nat: true,
             stack: "mixed",
             sniff: true,
-            sniff_override_destination: true
+            sniff_override_destination: false
         },
         {
             type: "mixed",
@@ -2464,7 +2386,7 @@ const singboxConfigTemp = {
             listen: "127.0.0.1",
             listen_port: 2080,
             sniff: true,
-            sniff_override_destination: true
+            sniff_override_destination: false
         }
     ],
     outbounds: [
